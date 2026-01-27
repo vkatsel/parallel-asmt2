@@ -6,7 +6,7 @@ using System.Threading;
 public class ThreadPool
 {
     private const int MaxQueueSize = 20;
-    private const int ThreadCount = 6;
+    private int _threadCount;
     
     private readonly Queue<Action> _taskQueue = new Queue<Action>();
     private List<Thread> _threads = new List<Thread>();
@@ -14,11 +14,12 @@ public class ThreadPool
     private readonly object _lock = new object();
 
     private bool _isWorking = true;
-    private bool _isPaused = false;
-
-    public ThreadPool()
+    private bool _isPaused;
+    
+    public void Start(int threadNum)
     {
-        for (int i = 0; i < ThreadCount; i++)
+        this._threadCount = threadNum;
+        for (int i = 0; i < _threadCount; i++)
         {
             _threads.Add(new Thread(WorkerMethod));
             _threads[i].Start();
@@ -42,30 +43,46 @@ public class ThreadPool
 
     public void Pause()
     {
-        
+        lock (_lock)
+        {
+            _isPaused = true;
+        }
     }
 
     public void Resume()
     {
-        
+        lock (_lock)
+        {
+            _isPaused = false;
+            Monitor.PulseAll(_lock);
+        }
     }
 
     public void Stop()
     {
-        
+        lock (_lock)
+        {
+            _isWorking = false;
+            Monitor.PulseAll(_lock);
+        }
     }
 
     private void WorkerMethod()
     {
         while (true)
         {
-            Action task =  null;
+            Action task = null;
             lock (_lock)
             {
-                while (_taskQueue.Count == 0 && _isWorking) 
+                while ((_taskQueue.Count == 0 || _isPaused) && _isWorking) 
                 {
                     Monitor.Wait(_lock);
                 }
+                
+                if (_taskQueue.Count > 0)
+                    task = _taskQueue.Dequeue();
+                
+                if (!_isWorking && _taskQueue.Count == 0) return;
             }
 
             if (task != null)
@@ -76,7 +93,7 @@ public class ThreadPool
                 }
                 catch (Exception e)
                 {
-                    
+                    Console.WriteLine($"[ERROR] Task failed: {e.Message}");
                 }
             }
         }
