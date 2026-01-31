@@ -1,4 +1,6 @@
-﻿namespace parallel_asmt2_vkasel;
+﻿using System.Diagnostics;
+
+namespace parallel_asmt2_vkasel;
 using System;
 using System.Collections.Generic;
 using System.Threading;
@@ -15,6 +17,10 @@ public class ThreadPool
 
     private bool _isWorking = true;
     private bool _isPaused;
+
+    public int RejectedCount { get; private set; } = 0;
+    private long _totalWaitTimeMs = 0;
+    private int _waitCycles = 0;
     
     public void Start(int threadNum)
     {
@@ -24,19 +30,37 @@ public class ThreadPool
             _threads.Add(new Thread(WorkerMethod));
             _threads[i].Start();
         }
+
+        Console.ForegroundColor = ConsoleColor.DarkYellow;
     }
 
-    public void AddTask(Action task)
+    public double GetAvgWaitTime()
+    {
+        lock (_lock)
+        {
+            if (_waitCycles == 0) return 0;
+            return (double)_totalWaitTimeMs / _waitCycles;
+        }
+    }
+
+    public void AddTask(Action task, int taskId)
     {
         lock (_lock)
         {
             if (_taskQueue.Count >= MaxQueueSize)
             {
-                Console.WriteLine("[INFO] Task Rejected");
+                RejectedCount++;
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine($"[ERROR] Task {taskId} Rejected");
                 return;
             }
             _taskQueue.Enqueue(task);
-            Console.WriteLine("[SUCCESS] Task accepted");
+            
+            Console.ForegroundColor = ConsoleColor.Green;
+            Console.WriteLine($"[SUCCESS] Task {taskId} accepted");
+            Console.ForegroundColor = ConsoleColor.Blue;
+            Console.WriteLine($"[INFO] Queue: {_taskQueue.Count}");
+            
             Monitor.Pulse(_lock);
         }
     }
@@ -74,9 +98,17 @@ public class ThreadPool
             Action task = null;
             lock (_lock)
             {
+                var stopwatch = Stopwatch.StartNew();
                 while ((_taskQueue.Count == 0 || _isPaused) && _isWorking) 
                 {
                     Monitor.Wait(_lock);
+                }
+                stopwatch.Stop();
+
+                if (stopwatch.ElapsedMilliseconds > 0)
+                {
+                    _totalWaitTimeMs += stopwatch.ElapsedMilliseconds;
+                    _waitCycles++;
                 }
                 
                 if (_taskQueue.Count > 0)
@@ -93,7 +125,9 @@ public class ThreadPool
                 }
                 catch (Exception e)
                 {
+                    Console.ForegroundColor = ConsoleColor.Red;
                     Console.WriteLine($"[ERROR] Task failed: {e.Message}");
+                    Console.ForegroundColor = ConsoleColor.DarkYellow;
                 }
             }
         }
